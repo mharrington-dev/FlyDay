@@ -129,7 +129,7 @@ function App() {
               FlyDay <span className="text-gray-400 font-light">| Wind Limit Checker</span>
             </h1>
           </div>
-          <p className="text-gray-400 ml-11">Plan your flights safely with personal minimums.</p>
+          <p className="text-gray-400 ml-11">Plan your flights safely with personal maximums.</p>
         </header>
 
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
@@ -205,10 +205,10 @@ function App() {
               </div>
             </div>
 
-            {/* Personal Minimums */}
+            {/* Personal Maximums */}
             <div className="bg-aviation-card p-6 rounded-xl shadow-lg border border-gray-700">
               <h2 className="text-xl font-semibold mb-4 flex items-center gap-2 text-aviation-accent">
-                <Wind className="w-5 h-5" /> Personal Minimums (kts)
+                <Wind className="w-5 h-5" /> Personal Maximums (kts)
               </h2>
 
               <div className="space-y-4">
