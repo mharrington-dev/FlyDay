@@ -343,6 +343,31 @@ function App() {
                 <p className="text-sm">{error}</p>
               </div>
             )}
+
+            <div className="mt-8 pt-6 border-t border-gray-700/50 text-xs text-gray-500 text-center space-y-2">
+              <div className="flex justify-center gap-3">
+                <a
+                  href="https://github.com/davidmegginson"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="hover:text-aviation-accent transition-colors"
+                >
+                  Airport Info
+                </a>
+                <span>•</span>
+                <a
+                  href="https://open-meteo.com/"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="hover:text-aviation-accent transition-colors"
+                >
+                  Weather Data
+                </a>
+              </div>
+              <p className="italic opacity-70">
+                Based on a hallway convo with RW by MLI
+              </p>
+            </div>
           </aside>
 
           {/* Scrollable Results Area */}
@@ -420,10 +445,10 @@ function App() {
                                         <div
                                           key={rwy.runway.id}
                                           className={`px-2 py-1 rounded text-xs font-mono ${idx === 0 && !isOverLimit
-                                              ? 'bg-aviation-accent/20 border border-aviation-accent text-aviation-accent font-bold'
-                                              : isOverLimit
-                                                ? 'bg-red-900/30 border border-red-500/50 text-red-300'
-                                                : 'bg-gray-700/50 border border-gray-600 text-gray-300'
+                                            ? 'bg-aviation-accent/20 border border-aviation-accent text-aviation-accent font-bold'
+                                            : isOverLimit
+                                              ? 'bg-red-900/30 border border-red-500/50 text-red-300'
+                                              : 'bg-gray-700/50 border border-gray-600 text-gray-300'
                                             }`}
                                         >
                                           Rwy {rwy.runway.id}: {rwy.crosswind.toFixed(1)} kt
