@@ -1,9 +1,9 @@
 import { useState, useEffect } from 'react'
 import { format, addDays, parseISO, getHours } from 'date-fns'
 import { Plane, Wind, AlertTriangle, CheckCircle2, XCircle, Calendar, Clock, MapPin } from 'lucide-react'
-import { getAirport, airports } from './services/airports'
+import { getAirport, airports } from './services/airports.js'
 import { fetchWeather, getWeatherCodeDescription } from './services/weather'
-import { getBestRunway } from './utils/windCalc'
+import { calculateAllRunwayCrosswinds } from './utils/windCalc'
 
 function App() {
   // State for inputs
@@ -22,20 +22,62 @@ function App() {
   const [weatherData, setWeatherData] = useState(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState(null)
-  const [airportInfo, setAirportInfo] = useState(getAirport('DVN'))
+  const [airportInfo, setAirportInfo] = useState(airports['DVN'])
 
-  // Handle airport change
+  // State for type-ahead search
+  const [showSuggestions, setShowSuggestions] = useState(false)
+  const [filteredAirports, setFilteredAirports] = useState([])
+
+  // Handle airport change with type-ahead
   const handleAirportChange = (e) => {
-    const code = e.target.value.toUpperCase()
-    setAirportCode(code)
-    const info = getAirport(code)
-    if (info) {
-      setAirportInfo(info)
-      setError(null)
-    } else {
-      setAirportInfo(null)
-      // Don't set error immediately, let them type
+    const value = e.target.value;
+    setAirportCode(value);
+
+    if (!value || value.trim() === '') {
+      setShowSuggestions(false);
+      setFilteredAirports([]);
+      setAirportInfo(null);
+      return;
     }
+
+    // Extract code if format is "CODE : City, State"
+    const code = value.split(':')[0].trim().toUpperCase();
+
+    // Filter airports for suggestions
+    const searchTerm = value.toLowerCase();
+    const matches = Object.values(airports)
+      .filter(airport => {
+        if (!airport || !airport.code) return false;
+        return (
+          airport.code.toLowerCase().includes(searchTerm) ||
+          (airport.city && airport.city.toLowerCase().includes(searchTerm)) ||
+          (airport.state && airport.state.toLowerCase().includes(searchTerm)) ||
+          (airport.name && airport.name.toLowerCase().includes(searchTerm))
+        );
+      })
+      .slice(0, 10); // Limit to 10 suggestions
+
+    setFilteredAirports(matches);
+    setShowSuggestions(matches.length > 0 && value.length > 0);
+
+    // Check for exact match
+    const info = airports[code];
+    if (info) {
+      setAirportInfo(info);
+      setError(null);
+    } else {
+      setAirportInfo(null);
+    }
+  }
+
+  // Handle selecting an airport from suggestions
+  const handleSelectAirport = (airport) => {
+    if (!airport || !airport.code) return;
+    setAirportCode(airport.code);
+    setAirportInfo(airport);
+    setShowSuggestions(false);
+    setFilteredAirports([]);
+    setError(null);
   }
 
   // Fetch data
@@ -61,7 +103,12 @@ function App() {
   const processWeatherData = () => {
     if (!weatherData || !weatherData.hourly) return []
 
-    const { time, wind_speed_10m, wind_direction_10m, wind_gusts_10m, weather_code } = weatherData.hourly
+    const { time, wind_speed_10m, wind_direction_10m, wind_gusts_10m, weather_code, temperature_2m } = weatherData.hourly
+
+    // Add defensive checks
+    if (!time || !wind_speed_10m || !wind_direction_10m || !wind_gusts_10m || !airportInfo || !airportInfo.runways) {
+      return []
+    }
 
     const groupedByDay = {}
 
@@ -76,26 +123,27 @@ function App() {
           groupedByDay[dateStr] = []
         }
 
-        const windSpeed = wind_speed_10m[index]
-        const windDir = wind_direction_10m[index]
-        const gust = wind_gusts_10m[index]
+        const windSpeed = wind_speed_10m[index] || 0
+        const windDir = wind_direction_10m[index] || 0
+        const gust = wind_gusts_10m[index] || 0
+        const temp = temperature_2m ? temperature_2m[index] : null
 
-        // Calculate crosswind using best runway
-        const { runway, crosswind } = getBestRunway(windSpeed, windDir, airportInfo.runways)
+        // Calculate crosswind for ALL runways
+        const runwayData = calculateAllRunwayCrosswinds(windSpeed, windDir, airportInfo.runways)
 
-        // Check limits
+        // Get the best runway (first in sorted array)
+        const bestRunway = runwayData.length > 0 ? runwayData[0] : null
+        const bestCrosswind = bestRunway ? bestRunway.crosswind : 0
+
+        // Check limits - overall status is ONLY based on surface wind and gust factor
+        // Crosswind only affects individual runway display, not overall flyability
         const isSurfaceOk = windSpeed <= maxSurfaceWind
-        const isCrosswindOk = crosswind <= maxCrosswind
-        const isGustOk = (gust - windSpeed) <= maxGust // Gust factor usually means (Gust - Sustained) or just Max Gust? 
-        // User said "max gust factor (default 8)". Usually "Gust Factor" is the difference between gust and sustained.
-        // But sometimes people mean just raw gust speed.
-        // "max gust factor" implies the spread. I will assume spread (Gust - Sustained).
-        // Wait, standard aviation "Gust Factor" is often (Gust - Sustained).
-        // Let's stick to that interpretation.
         const gustFactor = Math.max(0, gust - windSpeed)
         const isGustFactorOk = gustFactor <= maxGust
 
-        const isAllOk = isSurfaceOk && isCrosswindOk && isGustFactorOk
+        // Overall status: green check if surface wind AND gust factor are OK
+        // Individual runways will be colored based on their crosswind
+        const isAllOk = isSurfaceOk && isGustFactorOk
 
         groupedByDay[dateStr].push({
           time: t,
@@ -104,11 +152,12 @@ function App() {
           windDir,
           gust,
           gustFactor,
-          crosswind,
-          bestRunway: runway.id,
-          weatherCode: weather_code[index],
+          temperature: temp,
+          runwayData, // All runways with their crosswinds
+          bestRunway: bestRunway ? bestRunway.runway.id : 'N/A',
+          weatherCode: weather_code ? weather_code[index] : 0,
           isAllOk,
-          checks: { isSurfaceOk, isCrosswindOk, isGustFactorOk }
+          checks: { isSurfaceOk, isGustFactorOk }
         })
       }
     })
@@ -119,10 +168,10 @@ function App() {
   const results = processWeatherData()
 
   return (
-    <div className="min-h-screen bg-aviation-dark text-white p-4 md:p-8 font-sans">
-      <div className="max-w-6xl mx-auto">
-        {/* Header */}
-        <header className="mb-8 border-b border-gray-700 pb-6">
+    <div className="min-h-screen bg-aviation-dark text-white font-sans flex flex-col">
+      {/* Fixed Header */}
+      <header className="bg-aviation-dark border-b border-gray-700 px-4 md:px-8 py-6 flex-shrink-0">
+        <div className="max-w-7xl mx-auto">
           <div className="flex items-center gap-3 mb-2">
             <Plane className="text-aviation-accent w-8 h-8" />
             <h1 className="text-3xl md:text-4xl font-bold text-white tracking-tight">
@@ -130,11 +179,15 @@ function App() {
             </h1>
           </div>
           <p className="text-gray-400 ml-11">Plan your flights safely with personal maximums.</p>
-        </header>
+        </div>
+      </header>
 
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
-          {/* Sidebar / Controls */}
-          <div className="lg:col-span-4 space-y-6">
+      {/* Main Content Area */}
+      <div className="flex-1 flex overflow-hidden">
+        <div className="max-w-7xl mx-auto w-full flex flex-col lg:flex-row gap-0">
+
+          {/* Fixed Sidebar */}
+          <aside className="lg:w-96 flex-shrink-0 bg-aviation-dark p-4 md:p-6 space-y-6 lg:overflow-y-auto lg:max-h-[calc(100vh-140px)]">
 
             {/* Flight Parameters */}
             <div className="bg-aviation-card p-6 rounded-xl shadow-lg border border-gray-700">
@@ -143,15 +196,38 @@ function App() {
               </h2>
 
               <div className="space-y-4">
-                <div>
+                <div className="relative">
                   <label className="block text-sm text-gray-400 mb-1">Airport Code</label>
                   <input
                     type="text"
                     value={airportCode}
                     onChange={handleAirportChange}
+                    onFocus={() => {
+                      if (airportCode && !airportInfo) {
+                        handleAirportChange({ target: { value: airportCode } })
+                      }
+                    }}
+                    onBlur={() => setTimeout(() => setShowSuggestions(false), 200)}
                     className="w-full bg-gray-800 border border-gray-600 rounded-lg p-2.5 text-white focus:ring-2 focus:ring-aviation-accent focus:border-transparent outline-none uppercase font-mono"
-                    placeholder="e.g. DVN"
+                    placeholder="e.g., DVN"
                   />
+
+                  {/* Type-ahead suggestions */}
+                  {showSuggestions && filteredAirports.length > 0 && (
+                    <div className="absolute z-10 w-full mt-1 bg-gray-800 border border-gray-600 rounded-lg shadow-lg max-h-60 overflow-y-auto">
+                      {filteredAirports.map(airport => (
+                        <div
+                          key={airport.code}
+                          onClick={() => handleSelectAirport(airport)}
+                          className="px-3 py-2 hover:bg-aviation-accent hover:text-aviation-dark cursor-pointer transition-colors border-b border-gray-700 last:border-b-0"
+                        >
+                          <span className="font-mono font-bold">{airport.code}</span>
+                          <span className="text-gray-400"> : {airport.city}, {airport.state}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
                   {airportInfo && <p className="text-xs text-gray-500 mt-1 truncate">{airportInfo.name}</p>}
                 </div>
 
@@ -267,10 +343,10 @@ function App() {
                 <p className="text-sm">{error}</p>
               </div>
             )}
-          </div>
+          </aside>
 
-          {/* Results Area */}
-          <div className="lg:col-span-8">
+          {/* Scrollable Results Area */}
+          <main className="flex-1 overflow-y-auto p-4 md:p-6 lg:max-h-[calc(100vh-140px)]">
             {!weatherData ? (
               <div className="h-full flex flex-col items-center justify-center text-gray-500 bg-aviation-card/30 rounded-xl border border-gray-800 border-dashed min-h-[400px]">
                 <Wind className="w-16 h-16 mb-4 opacity-20" />
@@ -287,54 +363,83 @@ function App() {
 
                     <div className="divide-y divide-gray-700/50">
                       {hours.map((h) => (
-                        <div key={h.time} className="p-4 hover:bg-white/5 transition-colors flex items-center gap-4">
-                          {/* Status Icon */}
-                          <div className="shrink-0">
-                            {h.isAllOk ? (
-                              <CheckCircle2 className="w-8 h-8 text-aviation-success" />
-                            ) : (
-                              <XCircle className="w-8 h-8 text-aviation-danger" />
-                            )}
-                          </div>
-
-                          {/* Time */}
-                          <div className="w-16 shrink-0 text-center">
-                            <span className="text-lg font-bold block">{h.hour}:00</span>
-                          </div>
-
-                          {/* Weather Details */}
-                          <div className="flex-grow grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
-                            <div>
-                              <span className="block text-gray-400 text-xs uppercase tracking-wider">Conditions</span>
-                              <span className="font-medium text-white">{getWeatherCodeDescription(h.weatherCode)}</span>
+                        <div key={h.time} className="p-4 hover:bg-white/5 transition-colors">
+                          <div className="flex items-start gap-4">
+                            {/* Status Icon */}
+                            <div className="shrink-0">
+                              {h.isAllOk ? (
+                                <CheckCircle2 className="w-8 h-8 text-aviation-success" />
+                              ) : (
+                                <XCircle className="w-8 h-8 text-aviation-danger" />
+                              )}
                             </div>
 
-                            <div>
-                              <span className="block text-gray-400 text-xs uppercase tracking-wider">Surface Wind</span>
-                              <span className={`font-mono ${!h.checks.isSurfaceOk ? 'text-aviation-danger font-bold' : ''}`}>
-                                {h.windSpeed.toFixed(1)} kt @ {h.windDir}°
-                              </span>
+                            {/* Time */}
+                            <div className="w-16 shrink-0 text-center">
+                              <span className="text-lg font-bold block">{h.hour}:00</span>
                             </div>
 
-                            <div>
-                              <span className="block text-gray-400 text-xs uppercase tracking-wider">Crosswind</span>
-                              <span className={`font-mono ${!h.checks.isCrosswindOk ? 'text-aviation-danger font-bold' : ''}`}>
-                                {h.crosswind.toFixed(1)} kt (Rwy {h.bestRunway})
-                              </span>
-                            </div>
+                            {/* Weather Details */}
+                            <div className="flex-grow">
+                              <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4 text-sm mb-3">
+                                <div>
+                                  <span className="block text-gray-400 text-xs uppercase tracking-wider">Conditions</span>
+                                  <span className="font-medium text-white">{getWeatherCodeDescription(h.weatherCode)}</span>
+                                </div>
 
-                            <div>
-                              <span className="block text-gray-400 text-xs uppercase tracking-wider">Gust Factor</span>
-                              <span className={`font-mono ${!h.checks.isGustFactorOk ? 'text-aviation-danger font-bold' : ''}`}>
-                                {h.gustFactor.toFixed(1)} kt
-                              </span>
+                                {h.temperature !== null && (
+                                  <div>
+                                    <span className="block text-gray-400 text-xs uppercase tracking-wider">Temperature</span>
+                                    <span className="font-mono text-white">{h.temperature.toFixed(1)}°F</span>
+                                  </div>
+                                )}
+
+                                <div>
+                                  <span className="block text-gray-400 text-xs uppercase tracking-wider">Surface Wind</span>
+                                  <span className={`font-mono ${!h.checks.isSurfaceOk ? 'text-aviation-danger font-bold' : ''}`}>
+                                    {h.windSpeed.toFixed(1)} kt @ {h.windDir}°
+                                  </span>
+                                </div>
+
+                                <div>
+                                  <span className="block text-gray-400 text-xs uppercase tracking-wider">Gust Factor</span>
+                                  <span className={`font-mono ${!h.checks.isGustFactorOk ? 'text-aviation-danger font-bold' : ''}`}>
+                                    {h.gustFactor.toFixed(1)} kt
+                                  </span>
+                                </div>
+                              </div>
+
+                              {/* All Runways Crosswinds */}
+                              {h.runwayData && h.runwayData.length > 0 && (
+                                <div className="mt-2">
+                                  <span className="block text-gray-400 text-xs uppercase tracking-wider mb-1">Runway Crosswinds</span>
+                                  <div className="flex flex-wrap gap-2">
+                                    {h.runwayData.map((rwy, idx) => {
+                                      const isOverLimit = rwy.crosswind > maxCrosswind;
+                                      return (
+                                        <div
+                                          key={rwy.runway.id}
+                                          className={`px-2 py-1 rounded text-xs font-mono ${idx === 0 && !isOverLimit
+                                              ? 'bg-aviation-accent/20 border border-aviation-accent text-aviation-accent font-bold'
+                                              : isOverLimit
+                                                ? 'bg-red-900/30 border border-red-500/50 text-red-300'
+                                                : 'bg-gray-700/50 border border-gray-600 text-gray-300'
+                                            }`}
+                                        >
+                                          Rwy {rwy.runway.id}: {rwy.crosswind.toFixed(1)} kt
+                                        </div>
+                                      );
+                                    })}
+                                  </div>
+                                </div>
+                              )}
                             </div>
                           </div>
                         </div>
                       ))}
                       {hours.length === 0 && (
                         <div className="p-8 text-center text-gray-500">
-                          No hours match the selected time range (6AM - 9PM).
+                          No hours match the selected time range.
                         </div>
                       )}
                     </div>
@@ -342,7 +447,7 @@ function App() {
                 ))}
               </div>
             )}
-          </div>
+          </main>
         </div>
       </div>
     </div>

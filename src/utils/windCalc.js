@@ -54,3 +54,15 @@ export const getBestRunway = (windSpeed, windDir, runways) => {
         headwind: maxHeadwind
     };
 };
+
+export const calculateAllRunwayCrosswinds = (windSpeed, windDir, runways) => {
+    return runways.map(runway => {
+        const { crosswind, headwind } = calculateComponents(windSpeed, windDir, runway.heading);
+        return {
+            runway,
+            crosswind,
+            headwind
+        };
+    }).sort((a, b) => a.crosswind - b.crosswind); // Sort by crosswind, lowest first
+};
+

@@ -38,10 +38,11 @@ export const fetchWeather = async (lat, lon, startDate, endDate) => {
         const params = new URLSearchParams({
             latitude: lat,
             longitude: lon,
-            hourly: 'wind_speed_10m,wind_direction_10m,wind_gusts_10m,weather_code',
+            hourly: 'wind_speed_10m,wind_direction_10m,wind_gusts_10m,weather_code,temperature_2m',
             start_date: startDate, // YYYY-MM-DD
             end_date: endDate,     // YYYY-MM-DD
             wind_speed_unit: 'kn',
+            temperature_unit: 'fahrenheit',
             timezone: 'auto'
         });
 
